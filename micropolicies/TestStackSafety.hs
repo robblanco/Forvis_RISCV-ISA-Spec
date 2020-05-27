@@ -271,9 +271,9 @@ next_desc pplus def s d s'
               _ -> Nothing
     in
     Just $ d { pcdepth =
-                 if isCall then
+                 if isCall && not isRet then
                    pcdepth d + 1
-                 else if isRet then 
+                 else if isRet && not isCall then
                    pcdepth d - 1
                  else pcdepth d
              , memdepth =
@@ -281,10 +281,12 @@ next_desc pplus def s d s'
                    Just loc -> Map.insert loc (Stack (pcdepth d)) (memdepth d)
                    _ -> memdepth d
              , stack =
-                 if isCall then
+                 if isCall && not isRet then
                    ((s ^. ms . fpc, fromJust (s ^. ms . fgpr . at sp)), s) : stack d
-                 else if isRet then 
+                 else if isRet && not isCall then
                    tail $ stack d
+                 else if isCall && isRet then
+                   ((s ^. ms . fpc, fromJust (s ^. ms . fgpr . at sp)), s) : (tail $ stack d)
                  else stack d
              }
     -- TODO: This shouldn't be an error. Cut off execution?
