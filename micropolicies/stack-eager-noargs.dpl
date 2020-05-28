@@ -1,0 +1,163 @@
+module stack:
+
+type:
+    data ActivationId = Int (20) // TODO: better/flexible bounds
+
+metadata:
+    // the PC carries the current activation ID
+    PC ActivationId,    // a.k.a. IN
+    // saved stack pointer register
+    SP,
+    // memory cells in the stack are tagged with their activation ID
+    Stack ActivationId,
+    // code memory
+    Instr,
+    Call,               // a special tag added to declared call sites
+    // header sequence, a.k.a. Entry#
+    H1,                 // elided in base version
+    H2,
+    // return sequence, a.k.a. Exit# and Return
+    R1,                 // elided in base version
+    R2,
+    R3
+
+// ==============================================================================
+// ==============================================================================
+policy: main =
+
+// ------------------------------------------------------------------------------
+// CALLS
+
+// `old` corresponds to caller, `new` to callee
+// TODO: jalrGrp
+jalGrp (
+       code == {Instr, Call}, env == {(PC old)}
+    -> env = {(PC new),H1}, return = {(PC old)})
+
+// The return address will be stored directly on the stack and not in the
+// `return` field, partly to work around the lack of let-bindings in DPL.
+
+// ------------------------------------------------------------------------------
+// HEADER SEQUENCE
+
+// TODO: carried from old stack.dpl
+// val, mem used to be `Stack old` instead of `PC`
+^ storeGrp(
+       code == {Instr, H1}, env == [+H1], addr == {SP}, val == {(PC callee)}, mem == _
+    -> env = env[-H1,+H2], mem = {(PC callee)})
+
+// previously, op1 == {SP}
+^ immArithGrp(
+     code == {Instr, H2}, env == [+H2], op1 == _, op2 == _
+  -> env = env[-H2], res = {SP})
+
+// ------------------------------------------------------------------------------
+// RETURN SEQUENCE
+
+^ loadGrp(
+      code == {Instr, R1}, env == _, addr == {SP}, mem == {(PC _)}
+    -> env = env[+R2], res = mem)
+
+^ immArithGrp(
+     code == {Instr, R2}, env == _, op1 == {SP}, op2 == _
+  -> env = env[-R2,+R3], res = {})
+
+// Here, `old` stands for the caller in both `target` () and `env`
+^ jalrGrp(
+       code == {Instr, R3}, target == {(PC caller)}, env == {(PC _),R3}
+    -> env = {(PC caller)}, return = {})
+
+// ------------------------------------------------------------------------------
+// LOADS AND STORES
+
+// base policy has `| pcdepth <= memdepth` on the depths
+^ loadGrp(
+       code == {Instr}, env == {PC a}, addr == _, mem == {Stack a}
+    -> env = env, res = {})
+
+// base policy has `addr == [-SP], val == {}, mem == _` and various comments
+^ storeGrp(
+       code == {Instr}, env == {PC a}, addr == _, val == _, mem == {Stack a}
+    -> env = env, mem = {Stack a})
+
+// ------------------------------------------------------------------------------
+// OTHER INSTRUCTIONS
+
+// these were present in the base policy
+
+//^ arithGrp(
+//       code == {Instr}, env == _, op1 == [-SP], op2 == [-SP] //, res == {} (no can do)
+//    -> env = env, res = {} )
+
+//^ immArithGrp(
+//       code == {Instr}, env == _, op1 == [-SP] //, res == [-SP]
+//    -> env = env, res = {})
+
+//^ jalrGrp(
+//       code == {Instr}, target == {}, env == {(PC _)}, return == {}
+//    -> env = env, return = {} )
+
+// ==============================================================================
+// ==============================================================================
+// map external names (dotted strings) to tag sets
+
+group:
+    grp jalGrp(-> RD:return)
+        jal
+
+    grp jalrGrp(RS1:target -> RD:return)
+        jalr
+
+    grp branchGrp(RS1:op1, RS2:op2 -> )
+        beq
+        bne
+        blt
+        bge
+        bltu
+        bgeu
+
+    grp loadGrp(RS1:addr, MEM:mem -> RD:res)
+        lb
+        lh
+        lw
+        lbu
+        lhu
+
+    grp loadUpperGrp(-> RD:dest)
+        lui
+        auipc
+
+    grp storeGrp(RS1:addr, RS2:val, MEM:mem -> MEM:mem)
+        sb
+        sh
+        sw
+
+    grp immArithGrp(RS1:op1 -> RD:res)
+        addi
+        slti
+        sltiu
+        xori
+        ori
+        andi
+        slli
+        srli
+        srai
+
+    grp arithGrp(RS1:op1, RS2:op2 -> RD:res)
+        add
+        sub
+        sll
+        slt
+        sltu
+        xor
+        srl
+        sra
+        or
+        and
+
+    grp systemGrp( -> )
+        fence
+
+    grp privGrp( -> )
+        ecall
+        ebreak
